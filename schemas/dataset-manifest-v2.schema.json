@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://chenle02.github.io/total-coloring-data/schemas/dataset-manifest-v1.schema.json",
-  "title": "Total Coloring Dataset Manifest",
-  "description": "Complete inventory and provenance for one curated dataset release.",
+  "$id": "https://chenle02.github.io/total-coloring-data/schemas/dataset-manifest-v2.schema.json",
+  "title": "Total Coloring Dataset Manifest with External Artifacts",
+  "description": "Complete local inventory and immutable external-artifact bindings for one curated dataset release. External artifacts are not part of the managed-root or SHA256SUMS inventory.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -11,14 +11,15 @@
     "dataset",
     "release",
     "managed_roots",
-    "artifacts"
+    "artifacts",
+    "external_artifacts"
   ],
   "properties": {
     "$schema": {
-      "const": "schemas/dataset-manifest-v1.schema.json"
+      "const": "schemas/dataset-manifest-v2.schema.json"
     },
     "schema_version": {
-      "const": "1.0.0"
+      "const": "2.0.0"
     },
     "dataset": {
       "type": "object",
@@ -118,6 +119,47 @@
           "records": {
             "type": "integer",
             "minimum": 0
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "external_artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "url",
+          "media_type",
+          "bytes",
+          "sha256",
+          "description"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "format": "relative-path"
+          },
+          "url": {
+            "type": "string",
+            "format": "https-uri"
+          },
+          "media_type": {
+            "type": "string",
+            "minLength": 1
+          },
+          "bytes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "sha256": {
+            "type": "string",
+            "format": "sha256"
           },
           "description": {
             "type": "string",

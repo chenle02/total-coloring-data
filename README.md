@@ -11,13 +11,29 @@ provenance, schema, and independent verification procedure are fixed.
 
 ## Integrity contract
 
-Every released artifact must:
+Every repository-resident release artifact must:
 
 1. live under `results/` or `reports/`;
 2. appear exactly once in `manifests/dataset-manifest.json`;
 3. have its byte length and SHA-256 digest recorded in that manifest;
 4. appear in `SHA256SUMS`; and
 5. pass the dependency-free verifier and test suite.
+
+Manifest v1 remains supported for releases whose complete payload fits in the
+Git repository. Manifest v2 adds a separate `external_artifacts` inventory for
+large immutable replay archives. Each external entry binds a safe logical name,
+HTTPS URL, media type, byte length, SHA-256 digest, and description. External
+entries are deliberately excluded from the managed-root and `SHA256SUMS`
+inventories: those two inventories continue to describe local files exactly.
+Local paths, external names, and external URLs are ordered and unique, and a
+local path cannot also be declared as an external name.
+
+`managed_roots` is operational only when it is the exact JSON array
+`["reports", "results"]`; invalid values are never traversed. External URLs use
+a deliberately narrow canonical profile: literal lowercase `https://`, a
+lowercase DNS hostname with no user information or port, a nonempty normalized
+path, and no query, fragment, backslash, whitespace, non-ASCII character, or
+percent escape.
 
 Run the same checks used by continuous integration:
 
@@ -26,12 +42,49 @@ python3 scripts/verify_release.py --root .
 python3 -m unittest discover -s tests -v
 ```
 
+Normal verification never accesses the network. If a replay archive has
+already been downloaded, verify its exact bytes against the manifest with:
+
+```bash
+python3 scripts/verify_release.py --root . \
+  --external-file archives/order-8-replay.tar.gz=/path/to/order-8-replay.tar.gz
+```
+
+`--external-file NAME=PATH` is repeatable. Supplied names must be declared,
+unique, and safe; supplied paths must be regular non-symlink files. Omitting the
+option validates the external metadata and its summary binding without claiming
+that the remote bytes were fetched or checked.
+
+For a universal-census replay archive, supplying the file performs more than a
+top-level hash check. The verifier requires exactly one level-9 gzip member
+through raw-file EOF, with mtime zero, exact header
+`1f8b08000000000002ff`, OS 255, and valid CRC32 and ISIZE. Raw suffix bytes
+(including zeros), concatenated members, and in-gzip post-USTAR data are
+rejected. It requires receipt-derived canonical USTAR headers, zero member
+padding, exactly two zero end blocks followed by zeros only through the next
+10240-byte boundary, and the exact decompressed length. It then strictly parses
+every embedded manifest, completion marker, and JSONL record and recomputes run
+fingerprints, checking the complete
+completion-to-manifest-to-record hash, provenance, status-count, partition, and
+configured-check chain. It does not execute `geng` or independently replay the
+graph-coloring witnesses; those remain scientific checks in the pinned toolkit.
+
 The verifier fails on untrusted or modified schemas, path traversal, symlinks,
 hidden or unlisted managed artifacts, byte-count mismatches, digest mismatches,
 duplicate paths, noncanonical ordering, inconsistent checksum files, and
-status/certificate or producer/release provenance contradictions. JSON input is
+status/certificate or producer/release provenance contradictions. For bounded
+universal-census summaries it also checks producer provenance, configured-check
+uniqueness, per-run and aggregate count conservation, exact replay-archive
+metadata binding, archive-member identity, and finite-scope claim ordering and
+limitations. JSON input is
 strict: duplicate object keys and the nonstandard constants `NaN`, `Infinity`,
-and `-Infinity` are rejected. Candidate and published releases must use
+and `-Infinity` are rejected. JSON documents are limited to 16 MiB, nesting to
+128 levels, and integer literals to 128 decimal digits; lone UTF-16 surrogates
+are rejected recursively. `SHA256SUMS` must be valid UTF-8, is limited to 4 MiB,
+and has a 4096-byte physical-line limit including LF. Archive metadata JSON
+members are limited to 4 MiB before extraction or hashing, and each physical
+JSONL record line is limited to 16 MiB including LF. Candidate and published
+releases must use
 canonical UTC timestamps ending in `Z`, identify a nonzero generating Git
 commit, and contain no `.gitkeep` placeholders.
 
@@ -77,12 +130,41 @@ with a DOI-bearing research repository such as Zenodo. The Git repository
 should retain their manifest, checksums, schema, and a compact verification
 fixture rather than accumulating raw compute shards.
 
+The trusted `universal-census-summary-v1` representation is intentionally
+finite-scope. It records the exact code commit and source digest, generator
+executable digest and invocations, configured backend checks, per-order run
+receipts, conserved totals, claim IDs with explicitly bounded statuses, and
+limitations. A `verified_in_finite_scope` status is never an unbounded result;
+scientific replay remains a separate gate performed by the pinned toolkit.
+
+Summary v1 has exactly one claim: `claim_type: finite_bound` and
+`status: verified_in_finite_scope`. The claim orders must be exactly every run
+order; orders are positive and a summary contains at most 256 runs.
+`scope.require_high_degree` must be `true`, and the configured checks are
+exactly `dsatur-delta-plus-2`, `dsatur-delta-plus-3`, and
+`static-delta-plus-2`. Other claim types are reserved and are not permitted in
+v1. The publisher derives the canonical finite-scope sentence and exact
+limitations from the completed runs; callers cannot override either. The
+required language is specified in
+[`docs/universal-census-release-v1.md`](docs/universal-census-release-v1.md).
+
+The v1 universal release profile is deliberately unsharded. Each order has one
+run with generator arguments exactly `-q ORDER`, shard index zero and shard
+count one. Its archive contains exactly these members, with no directory
+entries: `order-NN/manifest.json`, `order-NN/completion.json`, and
+`order-NN/records.jsonl`. See
+[`docs/universal-census-release-v1.md`](docs/universal-census-release-v1.md) for
+the complete producer contract.
+
 ## Versioning and immutability
 
 Manifest and record schemas use semantic versions independently of the dataset
 release. Published artifacts are immutable: corrections receive a new dataset
 version and a documented supersession relationship. Filenames are never reused
-for different bytes within a published version.
+for different bytes within a published version. Dataset release versions use
+canonical SemVer core and prerelease syntax: core and numeric prerelease
+identifiers have no leading zeros, prerelease identifiers are nonempty, and
+build metadata is not accepted by this release profile.
 
 ## Citation and licenses
 

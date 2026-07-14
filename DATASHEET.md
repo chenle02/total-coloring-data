@@ -3,7 +3,8 @@
 ## Status
 
 - Dataset version: `0.1.0-dev`
-- Manifest schema: `1.0.0`
+- Active manifest schema: `1.0.0` (the empty development scaffold)
+- Supported manifest schemas: `1.0.0`, `2.0.0`
 - Scientific records: none released yet
 - Maintainers: Le Chen and Songling Shan
 - Last reviewed: 2026-07-14
@@ -37,6 +38,12 @@ may contain:
 Raw scheduler logs, temporary checkpoints, credentials, personal information,
 and unreviewed scratch output are excluded.
 
+Manifest v2 permits a compact local result to bind a large replay archive held
+outside Git. The external inventory records the archive's logical name, HTTPS
+URL, media type, exact byte length, SHA-256 digest, and description. The
+verifier does not download it; reviewers can supply already-fetched bytes for
+offline verification with `--external-file NAME=PATH`.
+
 ## Collection and computation
 
 Every release must record the generating code repository and exact commit,
@@ -67,6 +74,55 @@ standalone verifier checks the release integrity envelope for:
 - complete inventory of the managed directories;
 - duplicate result record identifiers; and
 - declared record counts and status/certificate/provenance consistency.
+
+For `universal-census-summary-v1`, the envelope verifier additionally checks
+that run status counts and aggregate totals are conserved, the configured check
+matrix is deterministic and unique, generator calls and archive members are
+present, `scope.require_high_degree` is `true`, producer provenance matches the
+release, and replay metadata
+exactly matches a declared external artifact.
+
+Summary v1 permits exactly one claim. It has `claim_type: finite_bound`, status
+`verified_in_finite_scope`, and an order list equal to every positive run order;
+v1 is capped at 256 runs. Its
+required checks are exactly `dsatur-delta-plus-2`,
+`dsatur-delta-plus-3`, and `static-delta-plus-2`. Its finite scope is derived
+canonically from the comma-space order list, not supplied by a caller:
+
+```text
+Only the complete unrestricted nauty-geng streams for the declared orders {orders}, filtered by 2*Delta(G) >= n, with every canonical equitable (Delta(G)+1)-class partition subjected to the three declared positive-witness checks.
+```
+
+The claim and the top-level summary must repeat exactly these limitations, in
+order:
+
+1. `The finite census is computational evidence and does not establish an unbounded theorem.`
+2. `Generator completeness is assumed for the hash-pinned nauty-geng executable.`
+
+Other claim types are reserved for future schemas and are not permitted in v1.
+
+When reviewers supply the bound replay archive, the verifier also checks its
+single-member deterministic gzip and USTAR metadata, exact normalized member
+inventory, member sizes and digests, strict canonical JSON and JSONL,
+recomputed toolkit run fingerprints, unsharded generator configuration,
+completion/hash chains, and record-derived counts. The release profile permits
+only unrestricted `geng` calls of the form `-q ORDER`. A finite-scope verified
+claim must cover the required DSATUR and independent static checks, contain at
+least one verified graph and partition, and have no candidate-negative,
+unknown, or error outcome in its supporting runs.
+
+The gzip member extends through raw EOF and has the exact header
+`1f8b08000000000002ff` (level 9, mtime zero, OS 255) plus a valid CRC32 and
+ISIZE trailer. No suffix, zero suffix, concatenated member, or in-gzip
+post-USTAR data is accepted. USTAR headers are derived from member receipts;
+member padding is zero; exactly two zero blocks terminate the archive, followed
+only by zeros through the next 10240-byte boundary; and the decompressed length
+is exact. Metadata JSON members are limited to 4 MiB, and JSONL physical lines
+to 16 MiB including LF. Strict JSON documents are limited to 16 MiB, nesting
+depth 128, and 128 decimal digits per integer literal.
+Lone surrogate strings are rejected recursively. Checksum input is bounded and
+must be valid UTF-8, and verifier diagnostics are capped fail-closed rather than
+growing without limit on adversarial input.
 
 The following are separate **scientific release-review gates**, not capabilities
 of the standalone envelope verifier:
