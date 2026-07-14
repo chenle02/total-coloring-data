@@ -5,7 +5,17 @@ and schema versions are independently versioned.
 
 ## Unreleased
 
+## [0.1.0] - 2026-07-14
+
 ### Added
+
+- First public finite universal auxiliary-extension census for graph orders
+  1 through 8: 13,598 graph records, 12,987 verified in scope, 611 filtered,
+  530,027 canonical partitions, and 1,590,081 configured witness checks, with
+  no candidate-negative, unknown, error, or backend-disagreement outcome.
+- Compact machine-readable summary and human-readable release report in Git,
+  plus a deterministic 114,485,197-byte external replay archive with SHA-256
+  `63b704c4035a06d617b000462d0a7ddd208b4024e219329f617fc464b2b53115`.
 
 - Additive `dataset-manifest-v2` support for hash-bound external replay
   archives while preserving the exact local managed-root and `SHA256SUMS`
@@ -53,5 +63,9 @@ and schema versions are independently versioned.
 ### Compatibility
 
 - Manifest v1 and `result-v1` remain accepted without migration.
-- The active development manifest remains on v1; this change publishes only
-  release infrastructure and no scientific result artifact.
+- The published v0.1.0 manifest uses v2; the standalone verifier can validate
+  the Git-resident envelope without downloading the external archive, or
+  validate supplied archive bytes entirely offline.
+
+[Unreleased]: https://github.com/chenle02/total-coloring-data/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/chenle02/total-coloring-data/releases/tag/v0.1.0
