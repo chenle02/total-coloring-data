@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+.coverage
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.venv/
+build/
+dist/
+site/
+.DS_Store
+
+# Promotion transactions are always ephemeral.
+.total-coloring-publish-*/
+*.publish-*.tmp
+

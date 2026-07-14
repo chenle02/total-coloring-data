@@ -1,0 +1,12 @@
+cff-version: 1.2.0
+message: "If you use these artifacts, cite this dataset and the associated paper or release report."
+title: "Total Coloring Data"
+type: dataset
+authors:
+  - family-names: Chen
+    given-names: Le
+  - family-names: Shan
+    given-names: Songling
+repository-artifact: "https://github.com/chenle02/total-coloring-data"
+license: CC-BY-4.0
+version: 0.1.0-dev

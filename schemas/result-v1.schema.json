@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://chenle02.github.io/total-coloring-data/schemas/result-v1.schema.json",
+  "title": "Total Coloring Result Record",
+  "description": "One finite coloring outcome with producer provenance. The standalone verifier enforces the cross-field rule that witness records have a nonempty certificate and all other statuses have a null certificate.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "record_id",
+    "problem_digest",
+    "status",
+    "producer",
+    "parameters",
+    "certificate"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0.0"
+    },
+    "record_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+    },
+    "problem_digest": {
+      "type": "string",
+      "format": "sha256"
+    },
+    "status": {
+      "enum": ["witness", "candidate_unsat", "unknown", "error"]
+    },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "commit", "version"],
+      "properties": {
+        "repository": {
+          "type": "string",
+          "format": "uri"
+        },
+        "commit": {
+          "type": "string",
+          "pattern": "^(?!0{40}$)[0-9a-f]{40}$"
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "parameters": {
+      "type": "object"
+    },
+    "certificate": {
+      "description": "A nonempty witness certificate when status is witness; null for candidate_unsat, unknown, and error.",
+      "type": ["object", "null"]
+    }
+  }
+}

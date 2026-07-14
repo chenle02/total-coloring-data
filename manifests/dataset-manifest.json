@@ -1,0 +1,22 @@
+{
+  "$schema": "schemas/dataset-manifest-v1.schema.json",
+  "schema_version": "1.0.0",
+  "dataset": {
+    "id": "total-coloring-data",
+    "title": "Total Coloring Data",
+    "license": "CC-BY-4.0",
+    "repository": "https://github.com/chenle02/total-coloring-data"
+  },
+  "release": {
+    "version": "0.1.0-dev",
+    "status": "development",
+    "created_utc": "2026-07-14T00:00:00Z",
+    "code_repository": "https://github.com/chenle02/total-coloring-toolkit",
+    "code_commit": "UNSET"
+  },
+  "managed_roots": [
+    "reports",
+    "results"
+  ],
+  "artifacts": []
+}
