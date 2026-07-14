@@ -121,19 +121,19 @@ def _summary(external: Path) -> dict[str, object]:
             "check_id": "dsatur-delta-plus-2",
             "backend_id": "dsatur-iterative-v1",
             "palette_offset": 1,
-            "description": "Primary finite witness search.",
+            "description": "Replayable DSATUR witness check with Delta(G)+2 colors for every canonical equitable partition.",
         },
         {
             "check_id": "dsatur-delta-plus-3",
             "backend_id": "dsatur-iterative-v1",
             "palette_offset": 2,
-            "description": "One-additional-color finite witness search.",
+            "description": "Replayable DSATUR witness check with Delta(G)+3 colors for every canonical equitable partition.",
         },
         {
             "check_id": "static-delta-plus-2",
             "backend_id": "static-order-iterative-v1",
             "palette_offset": 1,
-            "description": "Independent finite witness search.",
+            "description": "Replayable static-order witness check with Delta(G)+2 colors for every canonical equitable partition.",
         },
     ]
     members = {
@@ -890,6 +890,8 @@ class V2ReleaseVerifierTests(unittest.TestCase):
         self.assertIn("summary-claim-orders", zero_codes)
         with self.assertRaises(ValueError):
             _finite_scope_for_orders([0])
+        with self.assertRaises(ValueError):
+            _finite_scope_for_orders([17])
 
         with tempfile.TemporaryDirectory() as temporary:
             root, external = _make_v2_release(Path(temporary))
@@ -910,7 +912,7 @@ class V2ReleaseVerifierTests(unittest.TestCase):
         self.assertIn("summary-run-limit", run_limit_codes)
         self.assertIn("archive-run-limit", run_limit_codes)
 
-        for invalid_order in (0, False, 2.0):
+        for invalid_order in (0, False, 2.0, 17):
             with (
                 self.subTest(archive_order=invalid_order),
                 tempfile.TemporaryDirectory() as temporary,
@@ -919,20 +921,38 @@ class V2ReleaseVerifierTests(unittest.TestCase):
                 summary_path = root / "results/universal-summary.json"
                 summary = json.loads(summary_path.read_text(encoding="utf-8"))
                 summary["runs"][0]["order"] = invalid_order
+                summary["claims"][0]["orders"] = [invalid_order]
                 _write_json(summary_path, summary)
                 _refresh_local_integrity(root)
-                with patch(
-                    "scripts.verify_release._canonical_tar_layout",
-                    side_effect=AssertionError("layout must not run"),
-                ) as layout:
+                with (
+                    patch(
+                        "scripts.verify_release._canonical_tar_layout",
+                        side_effect=AssertionError("layout must not run"),
+                    ) as layout,
+                    patch(
+                        "scripts.verify_release.zlib.decompressobj",
+                        side_effect=AssertionError("decompression must not run"),
+                    ) as decompress,
+                    patch(
+                        "scripts.verify_release.tarfile.open",
+                        side_effect=AssertionError("archive open must not run"),
+                    ) as archive_open,
+                ):
                     invalid_order_report = verify_repository(
                         root, external_files=[(EXTERNAL_NAME, external)]
                     )
                 layout.assert_not_called()
+                decompress.assert_not_called()
+                archive_open.assert_not_called()
+            invalid_codes = {issue.code for issue in invalid_order_report.issues}
             self.assertIn(
                 "archive-summary-order",
-                {issue.code for issue in invalid_order_report.issues},
+                invalid_codes,
             )
+            if invalid_order == 17:
+                self.assertIn("schema-maximum", invalid_codes)
+                self.assertIn("summary-run-order", invalid_codes)
+                self.assertIn("summary-claim-orders", invalid_codes)
 
     def test_unhashable_embedded_status_values_never_crash(self) -> None:
         cases: tuple[tuple[str, str, object], ...] = (
@@ -1433,6 +1453,14 @@ class V2ReleaseVerifierTests(unittest.TestCase):
                 "schema-enum",
             ),
             (
+                "misleading-unbounded-description",
+                lambda value: value["checks"][0].__setitem__(
+                    "description",
+                    "This check proves an unbounded total-coloring theorem for every graph.",
+                ),
+                "summary-required-check",
+            ),
+            (
                 "restricted-generator",
                 lambda value: value["runs"][0].__setitem__(
                     "generator_arguments", ["-q", "-c", "2"]
@@ -1638,6 +1666,23 @@ class V2ReleaseVerifierTests(unittest.TestCase):
         run_properties = summary_schema["properties"]["runs"]["items"]["properties"]
         self.assertEqual(run_properties["shard_index"], {"type": "integer", "const": 0})
         self.assertEqual(run_properties["shard_count"], {"type": "integer", "const": 1})
+
+    def test_schema_maximum_is_json_number_type_aware(self) -> None:
+        cases = (
+            (16, False),
+            (17, True),
+            (16.5, True),
+            (True, False),
+            ("17", False),
+        )
+        for value, should_fail in cases:
+            with self.subTest(value=value):
+                issues: list[VerificationIssue] = []
+                _validate_instance(value, {"maximum": 16}, "$maximum", issues)
+                self.assertEqual(
+                    "schema-maximum" in {issue.code for issue in issues},
+                    should_fail,
+                )
 
     def test_strict_json_loader_rejects_overflowing_numeric_literal(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

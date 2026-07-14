@@ -152,7 +152,8 @@ scientific replay remains a separate gate performed by the pinned toolkit.
 
 Summary v1 has exactly one claim: `claim_type: finite_bound` and
 `status: verified_in_finite_scope`. The claim orders must be exactly every run
-order; orders are positive and a summary contains at most 256 runs.
+order; orders are integers from 1 through 16 and a summary contains at most 256
+runs.
 `scope.require_high_degree` must be `true`, and the configured checks are
 exactly `dsatur-delta-plus-2`, `dsatur-delta-plus-3`, and
 `static-delta-plus-2`. Other claim types are reserved and are not permitted in
@@ -160,6 +161,9 @@ v1. The publisher derives the canonical finite-scope sentence and exact
 limitations from the completed runs; callers cannot override either. The
 required language is specified in
 [`docs/universal-census-release-v1.md`](docs/universal-census-release-v1.md).
+Each check's backend, palette offset, and finite replayable-witness description
+are also exact contract fields; descriptions suggesting an unbounded theorem
+are rejected.
 
 The v1 universal release profile is deliberately unsharded. Each order has one
 run with generator arguments exactly `-q ORDER`, shard index zero and shard

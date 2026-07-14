@@ -46,7 +46,7 @@ TRUSTED_SCHEMA_DIGESTS = {
         "56acf75e9d41a64d1c2bf8d2e2651cb12a7fdefe7eac0ed55397dc231e36139a"
     ),
     UNIVERSAL_SUMMARY_SCHEMA_PATH: (
-        "3c62b94577b715c74e6cd70421c189332f10f242ffa2b7f2edf2e0f5e6186f09"
+        "0a32e047fa967f9d4bc87c2ee433d9e8af9095864920b37791b1aef171d675fd"
     ),
 }
 SUPPORTED_SCHEMA_URI = "https://json-schema.org/draft/2020-12/schema"
@@ -69,6 +69,7 @@ SUPPORTED_SCHEMA_KEYS = frozenset(
         "minItems",
         "maxItems",
         "minimum",
+        "maximum",
     }
 )
 
@@ -81,6 +82,7 @@ _MAX_REPLAY_UNCOMPRESSED_BYTES = 16 * 1024 * 1024 * 1024
 _MAX_CHECKSUM_FILE_BYTES = 4 * 1024 * 1024
 _MAX_CHECKSUM_LINE_BYTES = 4096
 _MAX_UNIVERSAL_RUNS = 256
+_MAX_UNIVERSAL_ORDER = 16
 _MAX_VERIFICATION_ISSUES = 1000
 _CANONICAL_MANAGED_ROOTS = ("reports", "results")
 _RFC3986_LITERAL_PCHAR = re.compile(r"[A-Za-z0-9._~!$&'()*+,;=:@-]+")
@@ -328,6 +330,14 @@ def _json_equal(left: Any, right: Any) -> bool:
     return bool(left == right)
 
 
+def _is_json_number(value: object) -> bool:
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, int):
+        return True
+    return isinstance(value, float) and math.isfinite(value)
+
+
 def _format_matches(value: str, format_name: str) -> bool:
     if format_name == "sha256":
         return re.fullmatch(r"[0-9a-f]{64}", value) is not None
@@ -464,6 +474,28 @@ def _validate_schema_definition(
             location,
             "minItems may not exceed maxItems",
         )
+    for keyword in ("minimum", "maximum"):
+        bound = schema.get(keyword)
+        if bound is not None and not _is_json_number(bound):
+            _issue(
+                issues,
+                "schema-definition",
+                location,
+                f"{keyword} must be a finite JSON number",
+            )
+    minimum = schema.get("minimum")
+    maximum = schema.get("maximum")
+    if (
+        _is_json_number(minimum)
+        and _is_json_number(maximum)
+        and cast(int | float, minimum) > cast(int | float, maximum)
+    ):
+        _issue(
+            issues,
+            "schema-definition",
+            location,
+            "minimum may not exceed maximum",
+        )
 
 
 def _validate_instance(
@@ -536,13 +568,13 @@ def _validate_instance(
                     _issue(issues, "schema-format", location, f"invalid {format_name}")
 
     minimum = schema.get("minimum")
-    if (
-        minimum is not None
-        and isinstance(instance, (int, float))
-        and not isinstance(instance, bool)
-    ):
+    if _is_json_number(minimum) and _is_json_number(instance):
         if instance < minimum:
             _issue(issues, "schema-minimum", location, f"minimum is {minimum}")
+    maximum = schema.get("maximum")
+    if _is_json_number(maximum) and _is_json_number(instance):
+        if instance > maximum:
+            _issue(issues, "schema-maximum", location, f"maximum is {maximum}")
 
     if isinstance(instance, dict):
         required = schema.get("required", [])
@@ -781,9 +813,21 @@ _UNIVERSAL_COUNT_KEYS = (
     "skipped",
 )
 _REQUIRED_UNIVERSAL_CHECKS = {
-    "dsatur-delta-plus-2": ("dsatur-iterative-v1", 1),
-    "dsatur-delta-plus-3": ("dsatur-iterative-v1", 2),
-    "static-delta-plus-2": ("static-order-iterative-v1", 1),
+    "dsatur-delta-plus-2": (
+        "dsatur-iterative-v1",
+        1,
+        "Replayable DSATUR witness check with Delta(G)+2 colors for every canonical equitable partition.",
+    ),
+    "dsatur-delta-plus-3": (
+        "dsatur-iterative-v1",
+        2,
+        "Replayable DSATUR witness check with Delta(G)+3 colors for every canonical equitable partition.",
+    ),
+    "static-delta-plus-2": (
+        "static-order-iterative-v1",
+        1,
+        "Replayable static-order witness check with Delta(G)+2 colors for every canonical equitable partition.",
+    ),
 }
 _REQUIRED_UNIVERSAL_CHECK_IDS = tuple(sorted(_REQUIRED_UNIVERSAL_CHECKS))
 _FINITE_BOUND_LIMITATIONS = (
@@ -796,8 +840,10 @@ _UNIVERSAL_RECORD_VERSION = "total-coloring.universal-census-record.v1"
 
 
 def _finite_scope_for_orders(orders: Sequence[int]) -> str:
-    if not orders or any(_positive_integer(order) is None for order in orders):
-        raise ValueError("finite-scope orders must be positive nonboolean integers")
+    if not orders or any(_universal_order(order) is None for order in orders):
+        raise ValueError(
+            f"finite-scope orders must be nonboolean integers in [1, {_MAX_UNIVERSAL_ORDER}]"
+        )
     rendered_orders = ", ".join(str(order) for order in orders)
     return (
         "Only the complete unrestricted nauty-geng streams for the declared orders "
@@ -816,6 +862,13 @@ def _nonnegative_integer(value: object) -> int | None:
 def _positive_integer(value: object) -> int | None:
     parsed = _nonnegative_integer(value)
     if parsed is not None and parsed >= 1:
+        return parsed
+    return None
+
+
+def _universal_order(value: object) -> int | None:
+    parsed = _positive_integer(value)
+    if parsed is not None and parsed <= _MAX_UNIVERSAL_ORDER:
         return parsed
     return None
 
@@ -962,13 +1015,18 @@ def _validate_universal_summary_semantics(
                 "backend_id and palette_offset pairs must be unique",
             )
         checks_by_id = {
-            item["check_id"]: (item["backend_id"], item["palette_offset"])
+            item["check_id"]: (
+                item["backend_id"],
+                item["palette_offset"],
+                item["description"],
+            )
             for item in checks
             if isinstance(item, dict)
             and isinstance(item.get("check_id"), str)
             and isinstance(item.get("backend_id"), str)
             and isinstance(item.get("palette_offset"), int)
             and not isinstance(item.get("palette_offset"), bool)
+            and isinstance(item.get("description"), str)
         }
         for check_id, required_spec in _REQUIRED_UNIVERSAL_CHECKS.items():
             if checks_by_id.get(check_id) != required_spec:
@@ -976,7 +1034,7 @@ def _validate_universal_summary_semantics(
                     issues,
                     "summary-required-check",
                     f"{location}.checks",
-                    f"{check_id!r} must declare backend/offset {required_spec!r}",
+                    f"{check_id!r} must declare exact backend, offset, and description {required_spec!r}",
                 )
         if checks_by_id != _REQUIRED_UNIVERSAL_CHECKS or check_ids != list(
             _REQUIRED_UNIVERSAL_CHECK_IDS
@@ -1032,7 +1090,7 @@ def _validate_universal_summary_semantics(
             run_location = f"{location}.runs[{run_index}]"
             if not isinstance(run, dict):
                 continue
-            order = _positive_integer(run.get("order"))
+            order = _universal_order(run.get("order"))
             if order is not None:
                 run_orders.append(order)
             else:
@@ -1040,7 +1098,7 @@ def _validate_universal_summary_semantics(
                     issues,
                     "summary-run-order",
                     f"{run_location}.order",
-                    "run order must be a positive nonboolean integer",
+                    f"run order must be a nonboolean integer in [1, {_MAX_UNIVERSAL_ORDER}]",
                 )
             run_fingerprint = run.get("run_fingerprint")
             if isinstance(run_fingerprint, str):
@@ -1241,7 +1299,7 @@ def _validate_universal_summary_semantics(
         runs_by_order = {
             run.get("order"): run
             for run in run_items
-            if isinstance(run, dict) and _positive_integer(run.get("order")) is not None
+            if isinstance(run, dict) and _universal_order(run.get("order")) is not None
         }
         for claim_index, claim in enumerate(claims):
             if not isinstance(claim, dict):
@@ -1267,7 +1325,7 @@ def _validate_universal_summary_semantics(
                 isinstance(orders, list)
                 and orders
                 and len(orders) <= _MAX_UNIVERSAL_RUNS
-                and all(_positive_integer(order) is not None for order in orders)
+                and all(_universal_order(order) is not None for order in orders)
             ):
                 valid_orders = orders
                 if orders != sorted(orders) or len(orders) != len(set(orders)):
@@ -2239,13 +2297,13 @@ def _verify_embedded_run(
                                 and parsed_offset is not None
                             ):
                                 expected_checks.append((backend_id, parsed_offset))
-                expected_order = _positive_integer(run.get("order"))
+                expected_order = _universal_order(run.get("order"))
                 if expected_order is None:
                     _issue(
                         issues,
                         "archive-summary-order",
                         f"{location}.order",
-                        "run order must be a positive nonboolean integer",
+                        f"run order must be a nonboolean integer in [1, {_MAX_UNIVERSAL_ORDER}]",
                     )
                     return
                 with stream:
@@ -2359,12 +2417,12 @@ def _expected_replay_descriptors(
                 "expected a run object",
             )
             return None
-        if _positive_integer(run.get("order")) is None:
+        if _universal_order(run.get("order")) is None:
             _issue(
                 issues,
                 "archive-summary-order",
                 f"{location}.runs[{run_index}].order",
-                "run order must be a positive nonboolean integer",
+                f"run order must be a nonboolean integer in [1, {_MAX_UNIVERSAL_ORDER}]",
             )
             return None
         members = run.get("members")

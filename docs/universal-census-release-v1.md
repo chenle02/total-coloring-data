@@ -13,8 +13,8 @@ forbidden.
 
 ## Completed run inputs
 
-There is exactly one completed toolkit run for each declared positive order,
-with at most 256 runs in one v1 summary. Every run
+There is exactly one completed toolkit run for each declared order from 1
+through 16, with at most 256 runs in one v1 summary. Every run
 must have the same toolkit source identity, generator executable identity,
 check matrix, filter, search limits, and checkpoint interval. Version 1 is
 explicitly unsharded:
@@ -32,6 +32,15 @@ The required check matrix is ordered as follows:
 
 The corresponding summary IDs are `dsatur-delta-plus-2`,
 `dsatur-delta-plus-3`, and `static-delta-plus-2`.
+
+Their descriptions are exact, in the same order:
+
+1. `Replayable DSATUR witness check with Delta(G)+2 colors for every canonical equitable partition.`
+2. `Replayable DSATUR witness check with Delta(G)+3 colors for every canonical equitable partition.`
+3. `Replayable static-order witness check with Delta(G)+2 colors for every canonical equitable partition.`
+
+These finite-witness descriptions are provenance-bearing contract data. They
+cannot be replaced by prose suggesting an unbounded theorem.
 
 The compact summary must set `scope.require_high_degree` to `true`. Thus the
 declared graph stream is filtered by `2*Delta(G) >= n`; this is part of the

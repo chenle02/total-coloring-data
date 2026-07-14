@@ -91,8 +91,8 @@ release envelope match the independently trusted repository, and replay metadata
 exactly matches a declared external artifact.
 
 Summary v1 permits exactly one claim. It has `claim_type: finite_bound`, status
-`verified_in_finite_scope`, and an order list equal to every positive run order;
-v1 is capped at 256 runs. Its
+`verified_in_finite_scope`, and an order list equal to every run order. Orders
+are integers from 1 through 16, and v1 is capped at 256 runs. Its
 required checks are exactly `dsatur-delta-plus-2`,
 `dsatur-delta-plus-3`, and `static-delta-plus-2`. Its finite scope is derived
 canonically from the comma-space order list, not supplied by a caller:
@@ -108,6 +108,10 @@ order:
 2. `Generator completeness is assumed for the hash-pinned nauty-geng executable.`
 
 Other claim types are reserved for future schemas and are not permitted in v1.
+The three configured checks also have exact canonical descriptions identifying
+finite replayable witness checks. A description that claims an unbounded
+theorem invalidates the release even when its check ID, backend, and palette
+offset are otherwise correct.
 
 When reviewers supply the bound replay archive, the verifier also checks its
 single-member deterministic gzip and USTAR metadata, exact normalized member

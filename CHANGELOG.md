@@ -41,6 +41,9 @@ and schema versions are independently versioned.
   override, coordinated-substitution regressions, literal RFC 3986 path
   component validation, explicitly typed shard constants, and bounded
   validation of oversized summary arrays.
+- Explicit universal-order ceiling 16 enforced by schema and before replay
+  archive layout/decompression, plus exact finite-witness descriptions for the
+  three canonical checks.
 - Adversarial v2 regression coverage for schema substitution, path and
   namespace collisions, ordering, duplicates, missing or modified external
   bytes, provenance mismatches, and count-conservation failures.

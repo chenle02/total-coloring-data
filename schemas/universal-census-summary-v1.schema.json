@@ -207,7 +207,8 @@
         "properties": {
           "order": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 16
           },
           "run_fingerprint": {
             "type": "string",
@@ -441,7 +442,8 @@
             "maxItems": 256,
             "items": {
               "type": "integer",
-              "minimum": 1
+              "minimum": 1,
+              "maximum": 16
             }
           },
           "required_checks": {
