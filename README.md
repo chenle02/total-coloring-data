@@ -5,9 +5,14 @@ Curated, machine-verifiable research artifacts produced by
 This repository is the public data layer for computational work on total
 coloring; it is not a live mirror of cluster scratch space.
 
-The repository is intentionally empty of scientific results at version
-`0.1.0-dev`. Results will be added only after their theorem statement,
-provenance, schema, and independent verification procedure are fixed.
+Version `0.1.0` publishes the finite universal auxiliary-extension census for
+orders 1 through 8. The compact summary and human-readable audit report live in
+Git; the complete 114,485,197-byte deterministic replay archive is attached to
+the [GitHub release](https://github.com/chenle02/total-coloring-data/releases/tag/v0.1.0).
+See the
+[release report](reports/universal-census-orders-01-08-v1.md) for the exact
+scope, counts, provenance, hashes, limitations, and public replay procedure.
+This bounded computation is evidence, not an unbounded theorem.
 
 ## Integrity contract
 
@@ -50,7 +55,8 @@ already been downloaded, verify its exact bytes against the manifest with:
 
 ```bash
 python3 scripts/verify_release.py --root . \
-  --external-file archives/order-8-replay.tar.gz=/path/to/order-8-replay.tar.gz
+  --external-file \
+  archives/universal-census-orders-01-08-v1.tar.gz=/path/to/universal-census-orders-01-08-v1.tar.gz
 ```
 
 `--external-file NAME=PATH` is repeatable. Supplied names must be declared,

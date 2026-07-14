@@ -119,10 +119,17 @@ def _make_release(root: Path) -> Path:
 
 
 class ReleaseVerifierTests(unittest.TestCase):
-    def test_repository_scaffold_verifies(self) -> None:
+    def test_repository_root_verifies_declared_artifact_count(self) -> None:
+        manifest = json.loads(
+            (REPOSITORY_ROOT / "manifests/dataset-manifest.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        artifacts = manifest["artifacts"]
+        self.assertIsInstance(artifacts, list)
         report = verify_repository(REPOSITORY_ROOT)
         self.assertTrue(report.ok, report.issues)
-        self.assertEqual(report.artifact_count, 0)
+        self.assertEqual(report.artifact_count, len(artifacts))
 
     def test_complete_candidate_release_verifies(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

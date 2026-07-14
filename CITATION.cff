@@ -9,4 +9,5 @@ authors:
     given-names: Songling
 repository-artifact: "https://github.com/chenle02/total-coloring-data"
 license: CC-BY-4.0
-version: 0.1.0-dev
+version: 0.1.0
+date-released: 2026-07-14

@@ -2,10 +2,11 @@
 
 ## Status
 
-- Dataset version: `0.1.0-dev`
-- Active manifest schema: `1.0.0` (the empty development scaffold)
+- Dataset version: `0.1.0`
+- Active manifest schema: `2.0.0`
 - Supported manifest schemas: `1.0.0`, `2.0.0`
-- Scientific records: none released yet
+- Scientific records: one compact order-1--8 summary, one audit report, and
+  one externally hosted deterministic replay archive
 - Maintainers: Le Chen and Songling Shan
 - Last reviewed: 2026-07-14
 
@@ -25,8 +26,17 @@ case. Its scope must be stated in each release manifest and associated report.
 
 ## Composition
 
-No scientific records are present in the development scaffold. Future releases
-may contain:
+The v0.1.0 release covers every simple unlabeled graph in the unrestricted
+`nauty-geng` streams for orders 1 through 8, with the declared high-degree
+filter. It contains a compact finite-scope summary and an audit report in Git.
+The external replay archive contains all 24 per-order manifests, completion
+markers, and JSONL record streams. Across 13,598 graphs, 12,987 were verified
+in scope, 611 were skipped by the filter, 530,027 canonical equitable
+partitions were enumerated, and 1,590,081 configured witness checks were
+performed. No candidate-negative, unknown, error, or backend-disagreement
+outcome occurred.
+
+This and future releases may contain:
 
 - canonical encodings of finite simple graphs;
 - total-coloring witness certificates;
@@ -43,6 +53,8 @@ outside Git. The external inventory records the archive's logical name, HTTPS
 URL, media type, exact byte length, SHA-256 digest, and description. The
 verifier does not download it; reviewers can supply already-fetched bytes for
 offline verification with `--external-file NAME=PATH`.
+For v0.1.0, the archive is 114,485,197 bytes with SHA-256
+`63b704c4035a06d617b000462d0a7ddd208b4024e219329f617fc464b2b53115`.
 External URLs use lowercase HTTPS, a lowercase DNS host, and nonempty literal
 RFC 3986 path components. Percent escapes, queries, fragments, authority
 decorations, double quotes, braces, brackets, DEL/control characters,
