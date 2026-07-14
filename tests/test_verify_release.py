@@ -1,15 +1,26 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import os
 import shutil
 import tempfile
 import unittest
 from collections.abc import Callable
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from unittest.mock import patch
 
-from scripts.verify_release import _load_json, verify_repository
+from scripts.verify_release import (
+    DEFAULT_EXPECTED_CODE_REPOSITORY,
+    VerificationIssue,
+    _load_json,
+    _managed_files,
+    _validate_instance,
+    main,
+    verify_repository,
+)
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 
@@ -160,6 +171,149 @@ class ReleaseVerifierTests(unittest.TestCase):
             report = verify_repository(root)
         codes = {issue.code for issue in report.issues}
         self.assertIn("schema-format", codes)
+
+    def test_manifest_versions_require_canonical_semver_without_build_metadata(
+        self,
+    ) -> None:
+        expected_pattern = (
+            r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
+            r"(?:-(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)"
+            r"(?:\.(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?"
+            r"(?![\s\S])"
+        )
+        valid_versions = (
+            "0.0.0",
+            "1.0.0",
+            "1.0.0-0",
+            "1.0.0-alpha.1",
+            "1.0.0-x.7.z.92",
+        )
+        invalid_versions = (
+            "01.0.0",
+            "1.01.0",
+            "1.0.01",
+            "1.0.0-",
+            "1.0.0-.alpha",
+            "1.0.0-alpha.",
+            "1.0.0-alpha..1",
+            "1.0.0-01",
+            "1.0.0-alpha.01",
+            "1.0.0+build.1",
+            "1.0.0-rc.1+build.1",
+            "1.0.0\n",
+            "1.0.0\r",
+            "0" + "9" * 4_999 + ".0.0",
+            "9" * 5_000 + ".0.0+build",
+            "1.0.0-0" + "9" * 4_999,
+            "1.0.0-" + "9" * 5_000 + "+build",
+        )
+        for schema_name in (
+            "dataset-manifest-v1.schema.json",
+            "dataset-manifest-v2.schema.json",
+        ):
+            schema = _load_json(REPOSITORY_ROOT / "schemas" / schema_name)
+            version_schema = schema["properties"]["release"]["properties"]["version"]
+            self.assertEqual(version_schema["pattern"], expected_pattern)
+            for version in valid_versions:
+                with self.subTest(schema=schema_name, valid=version):
+                    issues: list[VerificationIssue] = []
+                    _validate_instance(version, version_schema, "$version", issues)
+                    self.assertFalse(issues, issues)
+            for version in invalid_versions:
+                with self.subTest(schema=schema_name, invalid=version):
+                    issues = []
+                    _validate_instance(version, version_schema, "$version", issues)
+                    self.assertIn("schema-pattern", {issue.code for issue in issues})
+
+            long_invalid_version = "1.0.0-" + "a" * 100_000 + "+build"
+            long_issues: list[VerificationIssue] = []
+            _validate_instance(
+                long_invalid_version, version_schema, "$long-version", long_issues
+            )
+            self.assertIn("schema-pattern", {issue.code for issue in long_issues})
+
+    def test_untrusted_managed_roots_are_never_walked(self) -> None:
+        for managed_roots in (["/"], ["/absolute"], ["../"]):
+            with (
+                self.subTest(managed_roots=managed_roots),
+                tempfile.TemporaryDirectory() as temporary,
+            ):
+                root = _make_release(Path(temporary))
+                issues: list[VerificationIssue] = []
+                with patch(
+                    "scripts.verify_release.os.walk",
+                    side_effect=AssertionError("unsafe roots must not be walked"),
+                ) as walk:
+                    found = _managed_files(root, managed_roots, "candidate", issues)
+                walk.assert_not_called()
+                self.assertFalse(found)
+                self.assertIn("managed-root-config", {issue.code for issue in issues})
+
+    def test_manifest_managed_roots_must_be_exact_before_operational_use(self) -> None:
+        for managed_roots in (["/"], ["/absolute"], ["../"]):
+            with (
+                self.subTest(managed_roots=managed_roots),
+                tempfile.TemporaryDirectory() as temporary,
+            ):
+                root = _make_release(Path(temporary))
+                manifest_path = root / "manifests/dataset-manifest.json"
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                manifest["managed_roots"] = managed_roots
+                _canonical_json(manifest_path, manifest)
+                with patch(
+                    "scripts.verify_release.os.walk",
+                    side_effect=AssertionError("unsafe roots must not be walked"),
+                ) as walk:
+                    report = verify_repository(root)
+                walk.assert_not_called()
+            codes = {issue.code for issue in report.issues}
+            self.assertIn("schema-const", codes)
+            self.assertIn("managed-root-config", codes)
+
+    def test_code_repository_trust_rejects_coordinated_substitution(self) -> None:
+        attacker_repository = "https://example.org/attacker-toolkit"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = _make_release(Path(temporary))
+            manifest_path = root / "manifests/dataset-manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["release"]["code_repository"] = attacker_repository
+            _canonical_json(manifest_path, manifest)
+            result_path = root / "results/fixture.json"
+            result = json.loads(result_path.read_text(encoding="utf-8"))
+            result["producer"]["repository"] = attacker_repository
+            _canonical_json(result_path, result)
+            _refresh_artifact_integrity(root)
+
+            default_report = verify_repository(root)
+            override_report = verify_repository(
+                root, expected_code_repository=attacker_repository
+            )
+            invalid_policy_report = verify_repository(
+                root, expected_code_repository="not-a-repository-uri"
+            )
+            with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                cli_status = main(
+                    [
+                        "--root",
+                        str(root),
+                        "--expected-code-repository",
+                        attacker_repository,
+                    ]
+                )
+
+        default_codes = {issue.code for issue in default_report.issues}
+        self.assertIn("release-code-repository", default_codes)
+        self.assertIn("result-producer-repository", default_codes)
+        self.assertTrue(override_report.ok, override_report.issues)
+        self.assertEqual(
+            {issue.code for issue in invalid_policy_report.issues},
+            {"expected-code-repository"},
+        )
+        self.assertEqual(cli_status, 0)
+        self.assertEqual(
+            DEFAULT_EXPECTED_CODE_REPOSITORY,
+            "https://github.com/chenle02/total-coloring-toolkit",
+        )
 
     @unittest.skipUnless(hasattr(os, "symlink"), "symlinks unavailable")
     def test_symlinked_artifact_is_rejected(self) -> None:
