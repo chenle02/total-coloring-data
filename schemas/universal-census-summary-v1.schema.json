@@ -215,15 +215,19 @@
           },
           "generator_arguments": {
             "type": "array",
+            "minItems": 2,
+            "maxItems": 2,
             "items": {
               "type": "string",
               "minLength": 1
             }
           },
           "shard_index": {
+            "type": "integer",
             "const": 0
           },
           "shard_count": {
+            "type": "integer",
             "const": 1
           },
           "record_count": {
@@ -442,6 +446,8 @@
           },
           "required_checks": {
             "type": "array",
+            "minItems": 3,
+            "maxItems": 3,
             "const": [
               "dsatur-delta-plus-2",
               "dsatur-delta-plus-3",
@@ -454,6 +460,8 @@
           },
           "limitations": {
             "type": "array",
+            "minItems": 2,
+            "maxItems": 2,
             "const": [
               "The finite census is computational evidence and does not establish an unbounded theorem.",
               "Generator completeness is assumed for the hash-pinned nauty-geng executable."
@@ -468,6 +476,8 @@
     },
     "limitations": {
       "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
       "const": [
         "The finite census is computational evidence and does not establish an unbounded theorem.",
         "Generator completeness is assumed for the hash-pinned nauty-geng executable."

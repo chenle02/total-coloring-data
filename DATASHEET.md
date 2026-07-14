@@ -43,6 +43,10 @@ outside Git. The external inventory records the archive's logical name, HTTPS
 URL, media type, exact byte length, SHA-256 digest, and description. The
 verifier does not download it; reviewers can supply already-fetched bytes for
 offline verification with `--external-file NAME=PATH`.
+External URLs use lowercase HTTPS, a lowercase DNS host, and nonempty literal
+RFC 3986 path components. Percent escapes, queries, fragments, authority
+decorations, double quotes, braces, brackets, DEL/control characters,
+whitespace, backslashes, and non-ASCII text are rejected.
 
 ## Collection and computation
 
@@ -53,9 +57,13 @@ hashes. Release timestamps use canonical second-precision UTC form ending in
 IDs. Search reports should additionally record the graph generator and
 version, solver backend and version, operating environment or container digest,
 resource limits, shard identifiers, and counts for every terminal status.
-Each result record's producer repository and commit must equal the release
-envelope. The producer version is descriptive package metadata; it is not the
-dataset version and need not equal it.
+By default the standalone verifier independently trusts
+`https://github.com/chenle02/total-coloring-toolkit`. The manifest release and
+every result or summary producer must name that exact repository; coordinated
+substitution of both fields is rejected. Reuse with another trust anchor
+requires the explicit `--expected-code-repository URL` option. Producer commits
+must equal the release envelope. The producer version is descriptive package
+metadata; it is not the dataset version and need not equal it.
 
 Production solvers should emit positive witnesses. Negative claims require an
 independently checked proof artifact when the backend supports one; otherwise
@@ -78,8 +86,8 @@ standalone verifier checks the release integrity envelope for:
 For `universal-census-summary-v1`, the envelope verifier additionally checks
 that run status counts and aggregate totals are conserved, the configured check
 matrix is deterministic and unique, generator calls and archive members are
-present, `scope.require_high_degree` is `true`, producer provenance matches the
-release, and replay metadata
+present, `scope.require_high_degree` is `true`, producer provenance and the
+release envelope match the independently trusted repository, and replay metadata
 exactly matches a declared external artifact.
 
 Summary v1 permits exactly one claim. It has `claim_type: finite_bound`, status

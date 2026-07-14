@@ -1,20 +1,24 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import os
 import shutil
 import tempfile
 import unittest
 from collections.abc import Callable
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
 from scripts.verify_release import (
+    DEFAULT_EXPECTED_CODE_REPOSITORY,
     VerificationIssue,
     _load_json,
     _managed_files,
     _validate_instance,
+    main,
     verify_repository,
 )
 
@@ -198,6 +202,10 @@ class ReleaseVerifierTests(unittest.TestCase):
             "1.0.0-rc.1+build.1",
             "1.0.0\n",
             "1.0.0\r",
+            "0" + "9" * 4_999 + ".0.0",
+            "9" * 5_000 + ".0.0+build",
+            "1.0.0-0" + "9" * 4_999,
+            "1.0.0-" + "9" * 5_000 + "+build",
         )
         for schema_name in (
             "dataset-manifest-v1.schema.json",
@@ -261,6 +269,51 @@ class ReleaseVerifierTests(unittest.TestCase):
             codes = {issue.code for issue in report.issues}
             self.assertIn("schema-const", codes)
             self.assertIn("managed-root-config", codes)
+
+    def test_code_repository_trust_rejects_coordinated_substitution(self) -> None:
+        attacker_repository = "https://example.org/attacker-toolkit"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = _make_release(Path(temporary))
+            manifest_path = root / "manifests/dataset-manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["release"]["code_repository"] = attacker_repository
+            _canonical_json(manifest_path, manifest)
+            result_path = root / "results/fixture.json"
+            result = json.loads(result_path.read_text(encoding="utf-8"))
+            result["producer"]["repository"] = attacker_repository
+            _canonical_json(result_path, result)
+            _refresh_artifact_integrity(root)
+
+            default_report = verify_repository(root)
+            override_report = verify_repository(
+                root, expected_code_repository=attacker_repository
+            )
+            invalid_policy_report = verify_repository(
+                root, expected_code_repository="not-a-repository-uri"
+            )
+            with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                cli_status = main(
+                    [
+                        "--root",
+                        str(root),
+                        "--expected-code-repository",
+                        attacker_repository,
+                    ]
+                )
+
+        default_codes = {issue.code for issue in default_report.issues}
+        self.assertIn("release-code-repository", default_codes)
+        self.assertIn("result-producer-repository", default_codes)
+        self.assertTrue(override_report.ok, override_report.issues)
+        self.assertEqual(
+            {issue.code for issue in invalid_policy_report.issues},
+            {"expected-code-repository"},
+        )
+        self.assertEqual(cli_status, 0)
+        self.assertEqual(
+            DEFAULT_EXPECTED_CODE_REPOSITORY,
+            "https://github.com/chenle02/total-coloring-toolkit",
+        )
 
     @unittest.skipUnless(hasattr(os, "symlink"), "symlinks unavailable")
     def test_symlinked_artifact_is_rejected(self) -> None:

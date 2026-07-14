@@ -17,6 +17,7 @@ from scripts.verify_release import (
     VerificationIssue,
     _canonical_json_bytes,
     _finite_scope_for_orders,
+    _format_matches,
     _load_json,
     _validate_instance,
     verify_repository,
@@ -1313,6 +1314,47 @@ class V2ReleaseVerifierTests(unittest.TestCase):
         self.assertEqual(len(report.issues), 1000)
         self.assertEqual(report.issues[-1].code, "issue-limit")
 
+    def test_near_limit_arrays_obey_max_items_and_diagnostic_cap(self) -> None:
+        item_count = (16 * 1024 * 1024 - 2) // 5
+        self.assertLessEqual(5 * item_count + 1, 16 * 1024 * 1024)
+        near_limit_array = [None] * item_count
+
+        bounded_issues: list[VerificationIssue] = []
+        _validate_instance(
+            near_limit_array,
+            {"type": "array", "maxItems": 3, "items": {"type": "object"}},
+            "$bounded",
+            bounded_issues,
+        )
+        self.assertEqual(len(bounded_issues), 4)
+        self.assertEqual(bounded_issues[0].code, "schema-items")
+
+        capped_issues: list[VerificationIssue] = []
+        _validate_instance(
+            near_limit_array,
+            {"type": "array", "items": {"type": "object"}},
+            "$capped",
+            capped_issues,
+        )
+        self.assertEqual(len(capped_issues), 1000)
+        self.assertEqual(capped_issues[-1].code, "issue-limit")
+
+    def test_oversized_summary_arrays_short_circuit_semantics(self) -> None:
+        cases = (
+            ("checks", [None] * 10_000, "summary-check-limit"),
+            ("claims", [None] * 10_000, "summary-claim-count"),
+        )
+        for field, replacement, expected_code in cases:
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as temporary:
+                root, _ = _make_v2_release(Path(temporary))
+                summary_path = root / "results/universal-summary.json"
+                summary = json.loads(summary_path.read_text(encoding="utf-8"))
+                summary[field] = replacement
+                _write_json(summary_path, summary)
+                _refresh_local_integrity(root)
+                report = verify_repository(root)
+            self.assertIn(expected_code, {issue.code for issue in report.issues})
+
     def test_external_inventory_order_uniqueness_and_namespace_are_enforced(
         self,
     ) -> None:
@@ -1420,6 +1462,30 @@ class V2ReleaseVerifierTests(unittest.TestCase):
                 _refresh_local_integrity(root)
                 report = verify_repository(root)
             self.assertIn(expected_code, {issue.code for issue in report.issues})
+
+    def test_summary_repository_trust_rejects_coordinated_substitution(self) -> None:
+        attacker_repository = "https://example.org/attacker-toolkit"
+        with tempfile.TemporaryDirectory() as temporary:
+            root, _ = _make_v2_release(Path(temporary))
+            manifest_path = root / "manifests/dataset-manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["release"]["code_repository"] = attacker_repository
+            _write_json(manifest_path, manifest)
+            summary_path = root / "results/universal-summary.json"
+            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+            summary["producer"]["repository"] = attacker_repository
+            _write_json(summary_path, summary)
+            _refresh_local_integrity(root)
+
+            default_report = verify_repository(root)
+            override_report = verify_repository(
+                root, expected_code_repository=attacker_repository
+            )
+
+        default_codes = {issue.code for issue in default_report.issues}
+        self.assertIn("release-code-repository", default_codes)
+        self.assertIn("summary-producer-repository", default_codes)
+        self.assertTrue(override_report.ok, override_report.issues)
 
     def test_summary_archive_member_paths_must_be_unique_and_canonical(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -1546,15 +1612,32 @@ class V2ReleaseVerifierTests(unittest.TestCase):
         self.assertIn("schema-const", {issue.code for issue in const_issues})
         self.assertIn("schema-enum", {issue.code for issue in enum_issues})
 
-        with tempfile.TemporaryDirectory() as temporary:
-            root, _ = _make_v2_release(Path(temporary))
-            summary_path = root / "results/universal-summary.json"
-            summary = json.loads(summary_path.read_text(encoding="utf-8"))
-            summary["runs"][0]["shard_index"] = False
-            _write_json(summary_path, summary)
-            _refresh_local_integrity(root)
-            report = verify_repository(root)
-        self.assertIn("schema-const", {issue.code for issue in report.issues})
+        for field, replacement in (
+            ("shard_index", False),
+            ("shard_index", 0.0),
+            ("shard_count", True),
+            ("shard_count", 1.0),
+        ):
+            with (
+                self.subTest(field=field, replacement=replacement),
+                tempfile.TemporaryDirectory() as temporary,
+            ):
+                root, _ = _make_v2_release(Path(temporary))
+                summary_path = root / "results/universal-summary.json"
+                summary = json.loads(summary_path.read_text(encoding="utf-8"))
+                summary["runs"][0][field] = replacement
+                _write_json(summary_path, summary)
+                _refresh_local_integrity(root)
+                report = verify_repository(root)
+            codes = {issue.code for issue in report.issues}
+            self.assertIn("schema-type", codes)
+
+        summary_schema = _load_json(
+            REPOSITORY_ROOT / "schemas/universal-census-summary-v1.schema.json"
+        )
+        run_properties = summary_schema["properties"]["runs"]["items"]["properties"]
+        self.assertEqual(run_properties["shard_index"], {"type": "integer", "const": 0})
+        self.assertEqual(run_properties["shard_count"], {"type": "integer", "const": 1})
 
     def test_strict_json_loader_rejects_overflowing_numeric_literal(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -1585,6 +1668,15 @@ class V2ReleaseVerifierTests(unittest.TestCase):
             "https://-bad.example/archive.tar.gz",
             "https://github.com/archive tar.gz",
             "https://[bad/archive.tar.gz",
+            'https://github.com/a"b/archive.tar.gz',
+            "https://github.com/{archive}.tar.gz",
+            "https://github.com/[archive].tar.gz",
+            "https://github.com/`archive`.tar.gz",
+            "https://github.com/^archive.tar.gz",
+            "https://github.com/|archive.tar.gz",
+            "https://github.com/archive\x7f.tar.gz",
+            "https://github.com/archive\x1f.tar.gz",
+            "https://github.com/café/archive.tar.gz",
         )
         for url in invalid_urls:
             with self.subTest(url=url), tempfile.TemporaryDirectory() as temporary:
@@ -1611,6 +1703,38 @@ class V2ReleaseVerifierTests(unittest.TestCase):
         self.assertIn(
             "schema-format", {issue.code for issue in generic_uri_report.issues}
         )
+
+        valid_pchar_url = "https://example.org/AZaz09-._~!$&'()*+,;=:@/archive.tar.gz"
+        with tempfile.TemporaryDirectory() as temporary:
+            root, _ = _make_v2_release(Path(temporary))
+            manifest_path = root / "manifests/dataset-manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["external_artifacts"][0]["url"] = valid_pchar_url
+            _write_json(manifest_path, manifest)
+            summary_path = root / "results/universal-summary.json"
+            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+            summary["replay_archive"]["url"] = valid_pchar_url
+            _write_json(summary_path, summary)
+            _refresh_local_integrity(root)
+            valid_pchar_report = verify_repository(root)
+        self.assertTrue(valid_pchar_report.ok, valid_pchar_report.issues)
+
+    def test_https_path_component_ascii_alphabet_is_exact(self) -> None:
+        allowed = set(
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+            "abcdefghijklmnopqrstuvwxyz"
+            "0123456789"
+            "-._~!$&'()*+,;=:@"
+        )
+        for codepoint in range(128):
+            character = chr(codepoint)
+            if character == "/":
+                continue
+            url = f"https://example.org/a{character}b/archive.tar.gz"
+            with self.subTest(codepoint=codepoint, character=repr(character)):
+                self.assertEqual(
+                    _format_matches(url, "https-uri"), character in allowed
+                )
 
     def test_modified_v2_or_summary_schema_is_rejected_by_trust_pin(self) -> None:
         for schema_name in (

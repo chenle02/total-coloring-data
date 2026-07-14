@@ -37,6 +37,10 @@ and schema versions are independently versioned.
   metadata, canonical lowercase unescaped HTTPS external URLs, and fail-closed
   operational use of only the exact `["reports", "results"]` managed-root
   array.
+- Independent trusted-code-repository policy with an explicit CLI reuse
+  override, coordinated-substitution regressions, literal RFC 3986 path
+  component validation, explicitly typed shard constants, and bounded
+  validation of oversized summary arrays.
 - Adversarial v2 regression coverage for schema substitution, path and
   namespace collisions, ordering, duplicates, missing or modified external
   bytes, provenance mismatches, and count-conservation failures.

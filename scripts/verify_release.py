@@ -26,6 +26,7 @@ from urllib.parse import urlsplit
 
 MANIFEST_PATH = PurePosixPath("manifests/dataset-manifest.json")
 CHECKSUMS_PATH = PurePosixPath("SHA256SUMS")
+DEFAULT_EXPECTED_CODE_REPOSITORY = "https://github.com/chenle02/total-coloring-toolkit"
 MANIFEST_V1_SCHEMA_PATH = PurePosixPath("schemas/dataset-manifest-v1.schema.json")
 MANIFEST_V2_SCHEMA_PATH = PurePosixPath("schemas/dataset-manifest-v2.schema.json")
 RESULT_SCHEMA_PATH = PurePosixPath("schemas/result-v1.schema.json")
@@ -45,7 +46,7 @@ TRUSTED_SCHEMA_DIGESTS = {
         "56acf75e9d41a64d1c2bf8d2e2651cb12a7fdefe7eac0ed55397dc231e36139a"
     ),
     UNIVERSAL_SUMMARY_SCHEMA_PATH: (
-        "f99c48b617e971b9e179ecfc57f9f2792d798df2b89150ded26e3aac6b6d8495"
+        "3c62b94577b715c74e6cd70421c189332f10f242ffa2b7f2edf2e0f5e6186f09"
     ),
 }
 SUPPORTED_SCHEMA_URI = "https://json-schema.org/draft/2020-12/schema"
@@ -82,6 +83,7 @@ _MAX_CHECKSUM_LINE_BYTES = 4096
 _MAX_UNIVERSAL_RUNS = 256
 _MAX_VERIFICATION_ISSUES = 1000
 _CANONICAL_MANAGED_ROOTS = ("reports", "results")
+_RFC3986_LITERAL_PCHAR = re.compile(r"[A-Za-z0-9._~!$&'()*+,;=:@-]+")
 _TAR_BLOCK_SIZE = 512
 _TAR_RECORD_SIZE = 10_240
 _CANONICAL_GZIP_HEADER = b"\x1f\x8b\x08\x00\x00\x00\x00\x00\x02\xff"
@@ -340,7 +342,10 @@ def _format_matches(value: str, format_name: str) -> bool:
     if format_name == "https-uri":
         if (
             not value.startswith("https://")
-            or any(character.isspace() or ord(character) < 32 for character in value)
+            or any(
+                character.isspace() or ord(character) < 32 or ord(character) == 127
+                for character in value
+            )
             or "\\" in value
             or "%" in value
             or "?" in value
@@ -367,16 +372,24 @@ def _format_matches(value: str, format_name: str) -> bool:
         ):
             return False
         labels = hostname.split(".")
-        if len(labels) < 2 or any(
-            len(label) > 63
-            or re.fullmatch(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?", label) is None
-            for label in labels
+        if (
+            len(hostname) > 253
+            or len(labels) < 2
+            or any(
+                len(label) > 63
+                or re.fullmatch(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?", label) is None
+                for label in labels
+            )
         ):
             return False
         if not parsed.path.startswith("/") or parsed.path in {"", "/"}:
             return False
         parts = parsed.path.split("/")[1:]
-        return bool(parts) and all(part not in {"", ".", ".."} for part in parts)
+        return bool(parts) and all(
+            part not in {"", ".", ".."}
+            and _RFC3986_LITERAL_PCHAR.fullmatch(part) is not None
+            for part in parts
+        )
     if format_name == "date-time":
         try:
             parsed_time = datetime.fromisoformat(value.replace("Z", "+00:00"))
@@ -591,12 +604,23 @@ def _validate_instance(
         item_schema = schema.get("items")
         if isinstance(item_schema, dict):
             validated_items = instance
+            validation_limit: int | None = None
             if (
                 isinstance(maximum_items, int)
                 and not isinstance(maximum_items, bool)
                 and maximum_items >= 0
             ):
-                validated_items = instance[:maximum_items]
+                validation_limit = maximum_items
+            const_value = schema.get("const")
+            if isinstance(const_value, list):
+                const_limit = len(const_value)
+                validation_limit = (
+                    const_limit
+                    if validation_limit is None
+                    else min(validation_limit, const_limit)
+                )
+            if validation_limit is not None:
+                validated_items = instance[:validation_limit]
             for index, value in enumerate(validated_items):
                 if len(issues) >= _MAX_VERIFICATION_ISSUES:
                     return
@@ -704,7 +728,8 @@ def _validate_result_semantics(
 
     producer.version is descriptive package metadata and is intentionally not
     compared with the dataset release version. Repository and commit are exact
-    provenance bindings and must match the release envelope.
+    provenance bindings. The repository is trusted verifier configuration;
+    the commit must match the release envelope.
     """
 
     if not isinstance(record, dict):
@@ -718,7 +743,7 @@ def _validate_result_semantics(
                 issues,
                 "result-producer-repository",
                 f"{location}.producer.repository",
-                "must equal release.code_repository",
+                "must equal the trusted expected code repository",
             )
         if producer.get("commit") != expected_commit:
             _issue(
@@ -818,8 +843,9 @@ def _validate_universal_summary_semantics(
     """Check finite-census invariants that JSON Schema cannot express.
 
     This validates arithmetic, deterministic ordering, and exact provenance
-    bindings. It deliberately does not infer an unbounded mathematical claim
-    from finite status counts.
+    bindings. ``expected_repository`` is trusted verifier configuration, not a
+    value learned from the release being checked. It deliberately does not
+    infer an unbounded mathematical claim from finite status counts.
     """
 
     if not isinstance(summary, dict):
@@ -832,7 +858,7 @@ def _validate_universal_summary_semantics(
                 issues,
                 "summary-producer-repository",
                 f"{location}.producer.repository",
-                "must equal release.code_repository",
+                "must equal the trusted expected code repository",
             )
         if producer.get("commit") != expected_commit:
             _issue(
@@ -879,6 +905,14 @@ def _validate_universal_summary_semantics(
     checks = summary.get("checks")
     check_count = len(checks) if isinstance(checks, list) else 0
     if isinstance(checks, list):
+        if len(checks) > len(_REQUIRED_UNIVERSAL_CHECKS):
+            _issue(
+                issues,
+                "summary-check-limit",
+                f"{location}.checks",
+                f"summary v1 permits exactly {len(_REQUIRED_UNIVERSAL_CHECKS)} checks",
+            )
+            return
         if not checks:
             _issue(
                 issues,
@@ -1179,6 +1213,8 @@ def _validate_universal_summary_semantics(
                 f"{location}.claims",
                 "summary v1 requires exactly one finite_bound claim",
             )
+            if len(claims) > 1:
+                return
         claim_ids: list[str] = []
         for claim in claims:
             if isinstance(claim, dict):
@@ -1230,6 +1266,7 @@ def _validate_universal_summary_semantics(
             if (
                 isinstance(orders, list)
                 and orders
+                and len(orders) <= _MAX_UNIVERSAL_RUNS
                 and all(_positive_integer(order) is not None for order in orders)
             ):
                 valid_orders = orders
@@ -1289,8 +1326,10 @@ def _validate_universal_summary_semantics(
                     "finite_bound requires the canonical bounded-evidence and generator-completeness limitations",
                 )
             required_checks = claim.get("required_checks")
-            if isinstance(required_checks, list) and all(
-                isinstance(check_id, str) for check_id in required_checks
+            if (
+                isinstance(required_checks, list)
+                and len(required_checks) <= len(_REQUIRED_UNIVERSAL_CHECK_IDS)
+                and all(isinstance(check_id, str) for check_id in required_checks)
             ):
                 if required_checks != sorted(required_checks) or len(
                     required_checks
@@ -3074,10 +3113,23 @@ def _managed_files(
 
 
 def verify_repository(
-    root: Path, *, external_files: Sequence[tuple[str, Path]] = ()
+    root: Path,
+    *,
+    external_files: Sequence[tuple[str, Path]] = (),
+    expected_code_repository: str = DEFAULT_EXPECTED_CODE_REPOSITORY,
 ) -> VerificationReport:
     issues: list[VerificationIssue] = []
     root = root.resolve()
+    if not isinstance(expected_code_repository, str) or not _format_matches(
+        expected_code_repository, "uri"
+    ):
+        _issue(
+            issues,
+            "expected-code-repository",
+            "$verifier.expected_code_repository",
+            "expected code repository must be an explicit HTTP(S) repository URI",
+        )
+        return VerificationReport(str(root), str(MANIFEST_PATH), 0, tuple(issues))
     manifest_file = _resolve_regular_file(
         root, MANIFEST_PATH, str(MANIFEST_PATH), issues
     )
@@ -3121,6 +3173,8 @@ def verify_repository(
     if schema is None:
         return VerificationReport(str(root), str(MANIFEST_PATH), 0, tuple(issues))
     _validate_instance(manifest, schema, "$manifest", issues)
+    if len(issues) >= _MAX_VERIFICATION_ISSUES:
+        return VerificationReport(str(root), str(MANIFEST_PATH), 0, tuple(issues))
 
     artifacts = manifest.get("artifacts")
     if not isinstance(artifacts, list):
@@ -3220,6 +3274,13 @@ def verify_repository(
         release.get("code_repository") if isinstance(release, dict) else None
     )
     release_commit = release.get("code_commit") if isinstance(release, dict) else None
+    if release_repository != expected_code_repository:
+        _issue(
+            issues,
+            "release-code-repository",
+            "release.code_repository",
+            f"must exactly equal trusted repository {expected_code_repository!r}",
+        )
     if isinstance(release_status, str) and release_status in {
         "candidate",
         "published",
@@ -3356,7 +3417,7 @@ def verify_repository(
                 _validate_result_semantics(
                     record,
                     str(relative),
-                    release_repository,
+                    expected_code_repository,
                     release_commit,
                     issues,
                 )
@@ -3403,7 +3464,7 @@ def verify_repository(
                     _validate_universal_summary_semantics(
                         record,
                         str(relative),
-                        release_repository,
+                        expected_code_repository,
                         release_commit,
                         external_by_name,
                         issues,
@@ -3490,6 +3551,15 @@ def _build_parser() -> argparse.ArgumentParser:
         "--json", action="store_true", help="emit machine-readable report"
     )
     parser.add_argument(
+        "--expected-code-repository",
+        default=DEFAULT_EXPECTED_CODE_REPOSITORY,
+        metavar="URL",
+        help=(
+            "trusted generating code repository required exactly in the manifest and "
+            "result provenance; override explicitly only when reusing the verifier"
+        ),
+    )
+    parser.add_argument(
         "--external-file",
         action="append",
         default=[],
@@ -3505,7 +3575,11 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
-    report = verify_repository(args.root, external_files=args.external_file)
+    report = verify_repository(
+        args.root,
+        external_files=args.external_file,
+        expected_code_repository=args.expected_code_repository,
+    )
     if args.json:
         print(json.dumps(asdict(report), indent=2, sort_keys=True))
     elif report.ok:

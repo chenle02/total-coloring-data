@@ -89,8 +89,11 @@ identifiers cannot have leading zeros, prerelease identifiers cannot be empty,
 and this profile does not accept build metadata. `managed_roots` must remain the
 exact JSON array `["reports", "results"]`. External URLs must use literal
 lowercase `https://`, a lowercase DNS host, and a nonempty normalized path;
-percent escapes, queries, fragments, user information, ports, and non-ASCII
-text are forbidden.
+path components are restricted to literal RFC 3986 `pchar` characters. Percent
+escapes, queries, fragments, user information, ports, double quotes, braces,
+brackets, DEL/control characters, whitespace, backslashes, and non-ASCII text
+are forbidden. The verifier independently trusts the public toolkit repository;
+reuse with another trust anchor requires `--expected-code-repository URL`.
 
 An already-downloaded universal replay archive is content-verified, not merely
 hashed. It must contain exactly one level-9 gzip member through raw EOF, with

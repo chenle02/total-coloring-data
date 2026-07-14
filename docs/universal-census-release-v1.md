@@ -4,6 +4,13 @@ This profile is the exact producer/verifier interface for a compact bounded
 universal-census result and its external replay archive. It is intentionally a
 finite-computation contract, not an unbounded mathematical statement.
 
+The standalone verifier independently trusts
+`https://github.com/chenle02/total-coloring-toolkit` unless a reuser explicitly
+passes `--expected-code-repository URL`. Both the manifest release and summary
+producer must equal this value. Learning the expected repository from either
+release field would permit a coordinated provenance substitution and is
+forbidden.
+
 ## Completed run inputs
 
 There is exactly one completed toolkit run for each declared positive order,
@@ -69,6 +76,14 @@ order-NN/records.jsonl
 permitted. The summary binds every member path, byte length, and SHA-256 digest,
 then binds the complete archive's logical name, HTTPS URL, media type, byte
 length, and SHA-256 digest.
+
+The URL grammar is deliberately narrower than a generic URI: literal lowercase
+`https://`, a lowercase DNS host without user information or port, and one or
+more nonempty literal RFC 3986 path components. Percent escapes, query and
+fragment delimiters, double quotes, braces, brackets, DEL/C0 controls,
+whitespace, backslash, and non-ASCII text are forbidden. The permitted path
+component alphabet is ASCII alphanumeric plus `-._~!$&'()*+,;=:@`; apostrophe
+is an RFC 3986 sub-delimiter.
 
 Each embedded `manifest.json` and `completion.json` member is limited to 4 MiB
 before extraction or hashing. Each physical line in `records.jsonl` is limited

@@ -32,8 +32,11 @@ local path cannot also be declared as an external name.
 `["reports", "results"]`; invalid values are never traversed. External URLs use
 a deliberately narrow canonical profile: literal lowercase `https://`, a
 lowercase DNS hostname with no user information or port, a nonempty normalized
-path, and no query, fragment, backslash, whitespace, non-ASCII character, or
-percent escape.
+path, and no query, fragment, backslash, whitespace, non-ASCII character, DEL,
+control character, or percent escape. Each literal path component uses only
+RFC 3986 `pchar` characters: ASCII letters and digits, `-._~`, `!$&'()*+,;=`,
+`:`, and `@`. Thus double quotes, braces, brackets, backticks, carets, and pipes
+are rejected; apostrophe is retained as an RFC 3986 sub-delimiter.
 
 Run the same checks used by continuous integration:
 
@@ -54,6 +57,15 @@ python3 scripts/verify_release.py --root . \
 unique, and safe; supplied paths must be regular non-symlink files. Omitting the
 option validates the external metadata and its summary binding without claiming
 that the remote bytes were fetched or checked.
+
+The standalone verifier trusts
+`https://github.com/chenle02/total-coloring-toolkit` as the generating code
+repository by default. Both `release.code_repository` and result/summary
+producer provenance must equal that independently configured value, so a
+manifest cannot authorize a coordinated repository substitution. Reusers must
+select another trusted repository explicitly with
+`--expected-code-repository URL`; no manifest field or environment variable can
+change the default trust anchor.
 
 For a universal-census replay archive, supplying the file performs more than a
 top-level hash check. The verifier requires exactly one level-9 gzip member
@@ -109,10 +121,11 @@ in `scripts/verify_release.py`, and add a regression test. A dataset checkout
 cannot authorize a weakened replacement schema merely by pointing its manifest
 at that file.
 
-For result records, `producer.repository` and `producer.commit` must equal the
-manifest's `release.code_repository` and `release.code_commit`. The producer
-`version` is descriptive package metadata and is schema-validated, but it is
-not required to equal the independently versioned dataset release.
+For result records, `producer.repository` and the manifest's
+`release.code_repository` must both equal the verifier's independently trusted
+expected repository. `producer.commit` must equal `release.code_commit`. The
+producer `version` is descriptive package metadata and is schema-validated,
+but it is not required to equal the independently versioned dataset release.
 
 ## Layout
 
